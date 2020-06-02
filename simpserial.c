@@ -1,4 +1,3 @@
-
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -9,9 +8,9 @@
 #include <linux/proc_fs.h>
 #include <asm/io.h>
 #include <linux/interrupt.h>
- #include <linux/sched.h>
+#include  <linux/irq.h>
 
-MODULE_AUTHOR("VAMSI TECH");
+MODULE_AUTHOR("DEPIK Systems");
 MODULE_LICENSE("GPL");
 
 static int myser_open(struct inode *inode, struct file *file);
@@ -20,7 +19,6 @@ static ssize_t myser_read(struct file *file, char *buf, size_t count,
                           loff_t *offset);
 static ssize_t myser_write(struct file *file, const char *buf, size_t count,
                            loff_t *offset);
-
 
 
 #define MYDEV_MAJOR_NUM   42
@@ -44,12 +42,10 @@ static struct file_operations myser_ops =
 #define   DIV_LATCH_LOW    0
 #define   DIV_LATCH_HIGH   1
 #define   IER              1
-#define   IIR              2 //IIR(readable)
-#define   FCR		   2 //FCR(writable)	
-#define   DFR              3 
-#define   LCR              3 //LCR
-#define   MDMC             4 //MCR
-#define   LSR              5 //MSR
+#define   IIR              2
+#define   DFR              3
+#define   MDMC             4
+#define   LSR              5
 
 #define SER_DEV "myserDev"
 
@@ -87,7 +83,7 @@ Cblock_t Cblkp;
 *   Input : control block pointer.
 * Returns :  nothing
 *******************************************************************************/
-static void Int_Receiv()
+static void Int_Receiv(void)
 {
   while(inb(Cblkp.baseAddr+LSR) & 0x1)
   {
@@ -119,7 +115,7 @@ static void Int_Receiv()
 * Returns :
 *   nothing
 *******************************************************************************/
-static void Int_Transmt()
+static void Int_Transmt(void)
 {
   if(Cblkp.Txq.NoOfChar == 0)
   { 
@@ -145,7 +141,7 @@ static void Int_Transmt()
 * Name:myIntHandler
 * Description:
 *******************************************************************************/
-static irqreturn_t myIntHandler(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t myIntHandler(int irq, void *dev_id)
 {
 
   unsigned char intStat;
@@ -180,27 +176,26 @@ static int serInit(int irq, unsigned int baseaddr)
   Cblkp.baseAddr = baseaddr;
   Cblkp.irq = irq;
 
-   sema_init(&Cblkp.sem,1);
+  sema_init(&Cblkp.sem,1);
   init_waitqueue_head(&Cblkp.rxWq);
   init_waitqueue_head(&Cblkp.txWq);
 
   /*** Set the baud rate ***/
-  outb(0x83, Cblkp.baseAddr+LCR);
+  outb(0x83, Cblkp.baseAddr+DFR);
   outb(0x01, Cblkp.baseAddr+DIV_LATCH_LOW);
   outb(0x00, Cblkp.baseAddr+DIV_LATCH_HIGH);
-  outb(0x03, Cblkp.baseAddr+LCR);
+  outb(0x03, Cblkp.baseAddr+DFR);
   outb(0x0b, Cblkp.baseAddr+MDMC);
   outb(0x0, Cblkp.baseAddr+IER);
 
   /*** Enable Fifos ***/
-  outb(0dx7, Cblkp.baseAddr+FCR); 	
+  outb(0x7, Cblkp.baseAddr+IIR);
 
   /** Install ISR for serial port **/
-  //if(request_irq(irq, myIntHandler, SA_INTERRUPT, SER_DEV,NULL))
-if(request_irq(irq, myIntHandler, IRQF_DISABLED, SER_DEV,NULL))	
+  if(request_irq(irq, myIntHandler, IRQF_IRQPOLL, SER_DEV,NULL))
   {
     printk("<1>Can't get interrupt %d\n",irq);
-    return -1; 
+    return -1;
   }
    return 0;
 }
@@ -225,7 +220,7 @@ int myser_init(void)
 
   if(!request_region(SER_IOBASE,8,SER_DEV))
   {
-    printk(KERN_INFO "can't get I/O port address 0x3f8\n");
+    printk(KERN_INFO "can't get I/O port address 0x378\n");
     return -1;
   }
  
@@ -254,13 +249,13 @@ void myser_cleanup(void)
 *******************************************************************************/
 static int myser_open(struct inode *inode, struct file * file)
 {
-  try_module_get(THIS_MODUL                                                                                            E);
+  try_module_get(THIS_MODULE);
   if (file->f_mode & FMODE_READ)
     printk("<1>" "open for read\n");
   if (file->f_mode & FMODE_WRITE)
     printk("<1>" "opened for write\n");
 
-  /*** Enable (read)interrupts on serial port 1 */
+  /*** Enable interrupts on serial port 1 */
   outb(1, Cblkp.baseAddr+IER);
   
   return 0;	
@@ -319,8 +314,8 @@ static ssize_t myser_read(struct file *file, char * buf,
 * Name:myser_write
 * Description:
 *******************************************************************************/
-static int myser_write(struct file * file, const char * buf,
-                       size_t count,loff_t * offset)
+static ssize_t myser_write(struct file *file, const char *buf, size_t count,
+                           loff_t *offset)
 {
   int avllen, copylen, partlen;
   int culen = count;
