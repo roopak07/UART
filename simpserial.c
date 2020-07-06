@@ -10,7 +10,7 @@
 #include <linux/interrupt.h>
 #include  <linux/irq.h>
 
-MODULE_AUTHOR("DEPIK Systems");
+MODULE_AUTHOR("Roopak Houji");
 MODULE_LICENSE("GPL");
 
 static int myser_open(struct inode *inode, struct file *file);
